@@ -40,6 +40,7 @@ in
         description = "Path of the API socket to create.";
       };
 
+      # DEPRECATED use mutableSettings
       mutableConfig = mkOption {
         type = types.bool;
         default = false;
@@ -96,6 +97,15 @@ in
         description = ''
           Configuration for Klipper. See the [documentation](https://www.klipper3d.org/Overview.html#configuration-and-tuning-guides)
           for supported values.
+        '';
+      };
+
+      mutableSettings = mkOption {
+        type = types.nullOr format.type;
+        default = null;
+        description = lib.mdDoc ''
+          Mutable configuration for Klipper. See the [documentation](https://www.klipper3d.org/Overview.html#configuration-and-tuning-guides)
+          for supported values. These settings will be copied to klippers config directory if it doesn't already exist.
         '';
       };
 
