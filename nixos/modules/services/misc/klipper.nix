@@ -233,5 +233,6 @@ in
   };
   meta.maintainers = [
     maintainers.cab404
+    maintainers.madnessasap
   ];
 }
