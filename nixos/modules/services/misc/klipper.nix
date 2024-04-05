@@ -54,7 +54,7 @@ in
       mutableConfigFolder = mkOption {
         type = types.path;
         default = "/var/lib/klipper";
-        description = "Path to mutable Klipper config file.";
+        description = "Path to copy mutable Klipper config file to.";
       };
 
       configFile = mkOption {
