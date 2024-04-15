@@ -291,7 +291,7 @@ in
           # and include configFile and the a generated config file from 
           # settings.
           generateConfig = input: format.generate "klipper.cfg" (flattenConfig input);
-          printerConfigFile =
+          mutableConfigFile =
             if (cfg.mutableConfig)
             then
               (
@@ -305,7 +305,11 @@ in
                   { "include ${cfg.immutableConfigPath}" = { }; })
                 // cfg.mutableSettings
               );
-          printerConfigPath = cfg.mutableConfigFolder + "/printer.cfg";
+          mutableConfigPath = cfg.mutableConfigFolder + "/printer.cfg";
+          immutableConfigFile =
+            if (!cfg.mutableConfig)
+            then generateConfig cfg.settings
+            else "/dev/null";
         in
         {
           description = "Klipper 3D Printer Firmware";
@@ -313,14 +317,15 @@ in
           after = [ "network.target" ];
           preStart = ''
             mkdir -p ${cfg.mutableConfigFolder}
-            [ -e ${printerConfigPath} ] || {
-              cp ${printerConfigFile} ${printerConfigPath}
-              chmod ug+w ${printerConfigPath}
+            [ -e ${mutableConfigPath} ] || {
+              cp ${mutableConfigFile} ${mutableConfigPath}
+              chmod ug+w ${mutableConfigPath}
             }
+            ln -sf ${immutableConfigFile} ${cfg.immutableConfigPath} 
           '';
 
           serviceConfig = baseServiceConfig // {
-            ExecStart = "${cfg.package}/bin/klippy ${klippyArgs} ${printerConfigPath}";
+            ExecStart = "${cfg.package}/bin/klippy ${klippyArgs} ${mutableConfigPath}";
             RuntimeDirectory = "klipper";
             SupplementaryGroups = [ "dialout" ];
             WorkingDirectory = "${cfg.package}/lib";
@@ -356,11 +361,6 @@ in
             (filterAttrs (mcu: firmware: cfg.firmwares."${mcu}".enableKlipperFlash) firmwares);
         in
         [ klipper-genconf ] ++ firmwareFlasher ++ attrValues firmwares;
-
-      systemd.tmpfiles.settings.klipper = {
-        "${cfg.immutableConfigPath}"."L+".argument =
-          "${format.generate "klipper-immutable.cfg" (flattenConfig cfg.settings)}";
-      };
     }
 
     (mkIf (cfg.configFile != null) {
@@ -375,21 +375,25 @@ in
       in
       mkMerge [
         {
-          systemd = {
-            services.moonraker = {
-              description = "Moonraker, an API web server for Klipper";
-              wantedBy = [ "multi-user.target" ];
-              wants = [ "klipper.service" ];
-              after = [ "network.target" "klipper.service" ];
-              path = [ pkgs.iproute2 ];
-              serviceConfig = baseServiceConfig // {
-                ExecStart = "${pkgs.moonraker}/bin/moonraker"
-                  + " --datapath ${dataFolder}"
-                  + " --configfile ${moonrakerConfigFile}";
-                WorkingDirectory = "${dataFolder}";
+          systemd =
+            {
+              services.moonraker = {
+                description = "Moonraker, an API web server for Klipper";
+                wantedBy = [ "multi-user.target" ];
+                wants = [ "klipper.service" ];
+                after = [ "network.target" "klipper.service" ];
+                path = [ pkgs.iproute2 ];
+                preStart = ''
+                  mkdir -p backup certs comms config database gcodes logs
+                '';
+                serviceConfig = baseServiceConfig // {
+                  ExecStart = "${pkgs.moonraker}/bin/moonraker"
+                    + " --datapath ${dataFolder}"
+                    + " --configfile ${moonrakerConfigFile}";
+                  WorkingDirectory = "${dataFolder}";
+                };
               };
             };
-          };
 
           services.klipper = {
             apiServer.settings = {
@@ -414,19 +418,18 @@ in
             let
               polkitAllow = { user, ... }@subject: { id, ... }@action:
                 let
-                  actionFilters = [ "action.id == ${id}" ]
+                  actionFilters = [ ''action.id == "${id}"'' ]
                     ++ (mapAttrsToList
                     (name: value: ''action.lookup("${name}") == "${value}"'')
                     (removeAttrs action [ "id" ])
                   );
                 in
                 ''
-                  polkit.addRule(function(action. subject) {
+                  polkit.addRule(function(action, subject) {
                     if (subject.user == "${user}" && ${
                       concatStringsSep " && " actionFilters
-                    })
-                      { return polkit.Results.YES; }
-                    })
+                    }) { return polkit.Result.YES; }
+                  });
                 '';
               moonrakerAllow = polkitAllow { user = cfg.user; };
             in
@@ -448,7 +451,8 @@ in
         group = config.services.octoprint.group;
       };
     })
-  ]);
+  ]
+  );
 
   meta.maintainers = [
     maintainers.cab404
